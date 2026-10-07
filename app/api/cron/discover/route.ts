@@ -54,6 +54,8 @@ async function searchApple(term: string, country: string) {
     `&entity=song` +
     `&limit=25`;
 
+  console.log("APPLE ARANIYOR:", term, country);
+
   const response = await fetch(url, {
     headers: {
       "User-Agent": "GlobalMusic/1.0"
@@ -61,11 +63,25 @@ async function searchApple(term: string, country: string) {
     cache: "no-store"
   });
 
+  console.log(
+    "APPLE HTTP DURUMU:",
+    country,
+    response.status
+  );
+
   if (!response.ok) {
     throw new Error(`Apple API ${response.status}`);
   }
 
-  return (await response.json()) as AppleResponse;
+  const data = (await response.json()) as AppleResponse;
+
+  console.log(
+    "APPLE SONUCU:",
+    country,
+    data.resultCount ?? 0
+  );
+
+  return data;
 }
 
 export async function GET(req: Request) {
@@ -75,6 +91,8 @@ export async function GET(req: Request) {
     process.env.CRON_SECRET &&
     authorization !== `Bearer ${process.env.CRON_SECRET}`
   ) {
+    console.log("CRON YETKİ HATASI");
+
     return NextResponse.json(
       {
         ok: false,
@@ -84,11 +102,36 @@ export async function GET(req: Request) {
     );
   }
 
+  console.log("GLOBALMUSIC CRON BAŞLADI");
+
+  console.log(
+    "SUPABASE URL VAR:",
+    !!process.env.NEXT_PUBLIC_SUPABASE_URL
+  );
+
+  console.log(
+    "SUPABASE SECRET VAR:",
+    !!process.env.SUPABASE_SECRET_KEY
+  );
+
+  console.log(
+    "CRON SECRET VAR:",
+    !!process.env.CRON_SECRET
+  );
+
   const startedAt = new Date().toISOString();
 
   let found = 0;
   let added = 0;
   let skipped = 0;
+
+  const errors: string[] = [];
+
+  const searchResults: Array<{
+    term: string;
+    country: string;
+    count: number;
+  }> = [];
 
   try {
     for (const search of SEARCHES) {
@@ -101,6 +144,12 @@ export async function GET(req: Request) {
 
       found += tracks.length;
 
+      searchResults.push({
+        term: search.term,
+        country: search.country,
+        count: tracks.length
+      });
+
       for (const track of tracks) {
         if (
           !track.trackName ||
@@ -108,11 +157,19 @@ export async function GET(req: Request) {
           !track.trackViewUrl
         ) {
           skipped++;
+
+          if (errors.length < 10) {
+            errors.push(
+              "Eksik track bilgisi"
+            );
+          }
+
           continue;
         }
 
         const artistName = track.artistName.trim();
-        const artistNormalized = normalize(artistName);
+        const artistNormalized =
+          normalize(artistName);
 
         const { data: artist, error: artistError } =
           await supabaseAdmin
@@ -121,7 +178,8 @@ export async function GET(req: Request) {
               {
                 name: artistName,
                 normalized_name: artistNormalized,
-                image_url: track.artworkUrl100 ?? null,
+                image_url:
+                  track.artworkUrl100 ?? null,
                 country: search.country
               },
               {
@@ -133,42 +191,73 @@ export async function GET(req: Request) {
 
         if (artistError || !artist) {
           skipped++;
+
+          console.error(
+            "ARTIST HATASI:",
+            artistError
+          );
+
+          if (errors.length < 10) {
+            errors.push(
+              `Artist: ${
+                artistError?.message ??
+                "artist bulunamadı"
+              }`
+            );
+          }
+
           continue;
         }
 
         const trackData = {
           artist_id: artist.id,
+
           title: track.trackName.trim(),
-          normalized_title: normalize(track.trackName),
 
-          duration_seconds: track.trackTimeMillis
-            ? Math.round(track.trackTimeMillis / 1000)
-            : null,
+          normalized_title:
+            normalize(track.trackName),
 
-          genre: track.primaryGenreName ?? null,
+          duration_seconds:
+            track.trackTimeMillis
+              ? Math.round(
+                  track.trackTimeMillis / 1000
+                )
+              : null,
 
-          release_date: track.releaseDate
-            ? track.releaseDate.slice(0, 10)
-            : null,
+          genre:
+            track.primaryGenreName ?? null,
 
-          cover_url: track.artworkUrl100
-            ? track.artworkUrl100.replace(
-                "100x100bb",
-                "600x600bb"
-              )
-            : null,
+          release_date:
+            track.releaseDate
+              ? track.releaseDate.slice(0, 10)
+              : null,
 
-          preview_url: track.previewUrl ?? null,
+          cover_url:
+            track.artworkUrl100
+              ? track.artworkUrl100.replace(
+                  "100x100bb",
+                  "600x600bb"
+                )
+              : null,
 
-          stream_url: track.previewUrl ?? null,
+          preview_url:
+            track.previewUrl ?? null,
 
-          source_name: "Apple Music Preview",
+          stream_url:
+            track.previewUrl ?? null,
 
-          source_url: track.trackViewUrl,
+          source_name:
+            "Apple Music Preview",
+
+          source_url:
+            track.trackViewUrl,
 
           external_ids: {
-            apple_track_id: track.trackId ?? null,
-            apple_collection_id: track.collectionId ?? null
+            apple_track_id:
+              track.trackId ?? null,
+
+            apple_collection_id:
+              track.collectionId ?? null
           },
 
           downloadable: false,
@@ -178,18 +267,33 @@ export async function GET(req: Request) {
           is_active: true
         };
 
-        const { data: inserted, error: trackError } =
-          await supabaseAdmin
-            .from("tracks")
-            .upsert(trackData, {
-              onConflict: "source_name,source_url",
-              ignoreDuplicates: false
-            })
-            .select("id")
-            .single();
+        const {
+          data: inserted,
+          error: trackError
+        } = await supabaseAdmin
+          .from("tracks")
+          .upsert(trackData, {
+            onConflict:
+              "source_name,source_url",
+            ignoreDuplicates: false
+          })
+          .select("id")
+          .single();
 
         if (trackError) {
           skipped++;
+
+          console.error(
+            "TRACK HATASI:",
+            trackError
+          );
+
+          if (errors.length < 10) {
+            errors.push(
+              `Track "${track.trackName}": ${trackError.message}`
+            );
+          }
+
           continue;
         }
 
@@ -199,13 +303,26 @@ export async function GET(req: Request) {
       }
     }
 
+    console.log(
+      "GLOBALMUSIC CRON TAMAMLANDI",
+      {
+        found,
+        added,
+        skipped,
+        errors
+      }
+    );
+
     return NextResponse.json({
       ok: true,
-      message: "GlobalMusic keşfi tamamlandı.",
+
+      message:
+        "GlobalMusic keşfi tamamlandı.",
 
       started_at: startedAt,
 
-      finished_at: new Date().toISOString(),
+      finished_at:
+        new Date().toISOString(),
 
       searches: SEARCHES.length,
 
@@ -213,9 +330,18 @@ export async function GET(req: Request) {
 
       items_added_or_updated: added,
 
-      items_skipped: skipped
+      items_skipped: skipped,
+
+      errors,
+
+      search_results: searchResults
     });
   } catch (error) {
+    console.error(
+      "GLOBALMUSIC CRON GENEL HATA:",
+      error
+    );
+
     return NextResponse.json(
       {
         ok: false,
@@ -229,7 +355,11 @@ export async function GET(req: Request) {
 
         items_added_or_updated: added,
 
-        items_skipped: skipped
+        items_skipped: skipped,
+
+        errors,
+
+        search_results: searchResults
       },
       { status: 500 }
     );
