@@ -2,19 +2,18 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type AppleTrack = {
   trackId?: number;
   trackName?: string;
   artistName?: string;
-  collectionName?: string;
   artworkUrl100?: string;
   previewUrl?: string;
   trackViewUrl?: string;
   trackTimeMillis?: number;
   primaryGenreName?: string;
   releaseDate?: string;
-  country?: string;
   collectionId?: number;
 };
 
@@ -93,7 +92,11 @@ export async function GET(req: Request) {
 
   try {
     for (const search of SEARCHES) {
-      const data = await searchApple(search.term, search.country);
+      const data = await searchApple(
+        search.term,
+        search.country
+      );
+
       const tracks = data.results ?? [];
 
       found += tracks.length;
@@ -137,29 +140,41 @@ export async function GET(req: Request) {
           artist_id: artist.id,
           title: track.trackName.trim(),
           normalized_title: normalize(track.trackName),
+
           duration_seconds: track.trackTimeMillis
             ? Math.round(track.trackTimeMillis / 1000)
             : null,
+
           genre: track.primaryGenreName ?? null,
+
           release_date: track.releaseDate
             ? track.releaseDate.slice(0, 10)
             : null,
+
           cover_url: track.artworkUrl100
             ? track.artworkUrl100.replace(
                 "100x100bb",
                 "600x600bb"
               )
             : null,
+
           preview_url: track.previewUrl ?? null,
+
           stream_url: track.previewUrl ?? null,
+
           source_name: "Apple Music Preview",
+
           source_url: track.trackViewUrl,
+
           external_ids: {
             apple_track_id: track.trackId ?? null,
             apple_collection_id: track.collectionId ?? null
           },
+
           downloadable: false,
+
           download_url: null,
+
           is_active: true
         };
 
@@ -187,26 +202,36 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       message: "GlobalMusic keşfi tamamlandı.",
+
       started_at: startedAt,
+
       finished_at: new Date().toISOString(),
+
       searches: SEARCHES.length,
+
       items_found: found,
+
       items_added_or_updated: added,
+
       items_skipped: skipped
     });
   } catch (error) {
     return NextResponse.json(
       {
         ok: false,
+
         error:
           error instanceof Error
             ? error.message
             : "Bilinmeyen hata",
+
         items_found: found,
+
         items_added_or_updated: added,
+
         items_skipped: skipped
       },
       { status: 500 }
     );
   }
-    }
+}
