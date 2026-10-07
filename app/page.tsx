@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Search,
   Home,
@@ -22,13 +22,56 @@ import {
   Sun
 } from "lucide-react";
 
-const tracks = [
-  ["Son Yaz", "Zeynep Bastık", "3:24"],
-  ["Midnight", "The Weeknd", "4:12"],
-  ["Aşkın Rengi", "Semicenk", "3:56"],
-  ["Flowers", "Miley Cyrus", "3:20"],
-  ["Unutamam", "Edis", "3:48"],
-  ["Calm Down", "Rema", "3:39"]
+import { supabase } from "../lib/supabase";
+
+type Track = {
+  id: number | string;
+  title: string;
+  artist: string;
+  duration: string;
+  cover_url?: string | null;
+  stream_url?: string | null;
+  downloadable?: boolean;
+  download_url?: string | null;
+};
+
+const demoTracks: Track[] = [
+  {
+    id: "demo-1",
+    title: "Son Yaz",
+    artist: "Zeynep Bastık",
+    duration: "3:24"
+  },
+  {
+    id: "demo-2",
+    title: "Midnight",
+    artist: "The Weeknd",
+    duration: "4:12"
+  },
+  {
+    id: "demo-3",
+    title: "Aşkın Rengi",
+    artist: "Semicenk",
+    duration: "3:56"
+  },
+  {
+    id: "demo-4",
+    title: "Flowers",
+    artist: "Miley Cyrus",
+    duration: "3:20"
+  },
+  {
+    id: "demo-5",
+    title: "Unutamam",
+    artist: "Edis",
+    duration: "3:48"
+  },
+  {
+    id: "demo-6",
+    title: "Calm Down",
+    artist: "Rema",
+    duration: "3:39"
+  }
 ];
 
 const pics = [
@@ -44,8 +87,93 @@ export default function Page() {
   const [dark, setDark] = useState(true);
   const [active, setActive] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [tracks, setTracks] = useState<Track[]>(demoTracks);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
-  const track = tracks[active];
+  useEffect(() => {
+    async function loadTracks() {
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("tracks")
+        .select(
+          "id,title,duration_seconds,cover_url,stream_url,downloadable,download_url,artists(name)"
+        )
+        .eq("is_active", true)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.error("GlobalMusic Supabase:", error);
+        setLoading(false);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const realTracks: Track[] = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          artist:
+            item.artists?.name ||
+            "Bilinmeyen Sanatçı",
+          duration: formatDuration(item.duration_seconds),
+          cover_url: item.cover_url,
+          stream_url: item.stream_url,
+          downloadable: item.downloadable,
+          download_url: item.download_url
+        }));
+
+        setTracks(realTracks);
+      }
+
+      setLoading(false);
+    }
+
+    loadTracks();
+  }, []);
+
+  const filteredTracks = tracks.filter((track) => {
+    const q = search.toLowerCase().trim();
+
+    if (!q) return true;
+
+    return (
+      track.title.toLowerCase().includes(q) ||
+      track.artist.toLowerCase().includes(q)
+    );
+  });
+
+  const currentTrack =
+    filteredTracks[active] ||
+    tracks[active] ||
+    demoTracks[0];
+
+  function selectTrack(index: number) {
+    setActive(index);
+    setPlaying(true);
+  }
+
+  function downloadTrack() {
+    if (
+      currentTrack.downloadable &&
+      currentTrack.download_url
+    ) {
+      window.open(
+        currentTrack.download_url,
+        "_blank",
+        "noopener,noreferrer"
+      );
+      return;
+    }
+
+    alert(
+      "Bu içerik için kaynak tarafından izin verilen bir indirme bağlantısı bulunmuyor."
+    );
+  }
 
   return (
     <main className={dark ? "site dark" : "site"}>
@@ -96,18 +224,29 @@ export default function Page() {
         <header>
 
           <div className="search">
+
             <Search size={19} />
 
             <input
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setActive(0);
+              }}
               placeholder="Şarkı, sanatçı, albüm veya video ara..."
             />
+
           </div>
 
           <button
             className="round"
             onClick={() => setDark(!dark)}
           >
-            {dark ? <Sun size={19} /> : <Moon size={19} />}
+            {dark ? (
+              <Sun size={19} />
+            ) : (
+              <Moon size={19} />
+            )}
           </button>
 
           <button className="login">
@@ -136,13 +275,25 @@ export default function Page() {
 
             <button
               className="primary"
-              onClick={() => setPlaying(true)}
+              onClick={() => {
+                setActive(0);
+                setPlaying(true);
+              }}
             >
               <Play size={18} />
               Hemen Keşfet
             </button>
 
-            <button className="secondary">
+            <button
+              className="secondary"
+              onClick={() => {
+                const random =
+                  Math.floor(Math.random() * tracks.length);
+
+                setActive(random);
+                setPlaying(true);
+              }}
+            >
               <Shuffle size={17} />
               Rastgele Dinle
             </button>
@@ -178,42 +329,62 @@ export default function Page() {
 
         <Section title="Yeni Eklenenler">
 
-          <div className="cards">
+          {loading ? (
+            <p className="loading">
+              GlobalMusic verileri yükleniyor...
+            </p>
+          ) : (
+            <div className="cards">
 
-            {tracks.map((x, i) => (
+              {filteredTracks.map((x, i) => {
 
-              <article
-                key={x[0]}
-                onClick={() => {
-                  setActive(i);
-                  setPlaying(true);
-                }}
-              >
+                const originalIndex = tracks.findIndex(
+                  (track) => track.id === x.id
+                );
 
-                <div className="cover">
+                return (
+                  <article
+                    key={x.id}
+                    onClick={() =>
+                      selectTrack(
+                        originalIndex >= 0
+                          ? originalIndex
+                          : i
+                      )
+                    }
+                  >
 
-                  <img
-                    src={`https://images.unsplash.com/photo-${pics[i]}?w=600`}
-                    alt={x[0]}
-                  />
+                    <div className="cover">
 
-                  <span>
-                    <Play size={19} fill="currentColor" />
-                  </span>
+                      <img
+                        src={
+                          x.cover_url ||
+                          `https://images.unsplash.com/photo-${pics[i % pics.length]}?w=600`
+                        }
+                        alt={x.title}
+                      />
 
-                </div>
+                      <span>
+                        <Play
+                          size={19}
+                          fill="currentColor"
+                        />
+                      </span>
 
-                <b>{x[0]}</b>
+                    </div>
 
-                <small>
-                  {x[1]} · {x[2]}
-                </small>
+                    <b>{x.title}</b>
 
-              </article>
+                    <small>
+                      {x.artist} · {x.duration}
+                    </small>
 
-            ))}
+                  </article>
+                );
+              })}
 
-          </div>
+            </div>
+          )}
 
         </Section>
 
@@ -221,16 +392,22 @@ export default function Page() {
 
           <div className="artists">
 
-            {tracks.map((x, i) => (
+            {tracks.slice(0, 6).map((x, i) => (
 
-              <div className="artist" key={x[1]}>
+              <div
+                className="artist"
+                key={`${x.artist}-${i}`}
+              >
 
                 <img
-                  src={`https://images.unsplash.com/photo-${pics[i]}?w=300`}
-                  alt={x[1]}
+                  src={
+                    x.cover_url ||
+                    `https://images.unsplash.com/photo-${pics[i % pics.length]}?w=300`
+                  }
+                  alt={x.artist}
                 />
 
-                <span>{x[1]}</span>
+                <span>{x.artist}</span>
 
               </div>
 
@@ -251,7 +428,7 @@ export default function Page() {
               "🇰🇷 Kore",
               "🇸🇦 Arapça",
               "🌍 Dünya"
-            ].map(x => (
+            ].map((x) => (
               <div key={x}>
                 {x}
               </div>
@@ -266,15 +443,18 @@ export default function Page() {
       <footer className="player">
 
         <img
-          src={`https://images.unsplash.com/photo-${pics[active]}?w=200`}
+          src={
+            currentTrack.cover_url ||
+            `https://images.unsplash.com/photo-${pics[active % pics.length]}?w=200`
+          }
           alt=""
         />
 
         <div className="now">
 
-          <b>{track[0]}</b>
+          <b>{currentTrack.title}</b>
 
-          <small>{track[1]}</small>
+          <small>{currentTrack.artist}</small>
 
         </div>
 
@@ -282,7 +462,16 @@ export default function Page() {
           <Shuffle size={17} />
         </button>
 
-        <button>
+        <button
+          onClick={() => {
+            const next =
+              active <= 0
+                ? tracks.length - 1
+                : active - 1;
+
+            setActive(next);
+          }}
+        >
           <SkipBack size={20} />
         </button>
 
@@ -290,12 +479,23 @@ export default function Page() {
           className="play"
           onClick={() => setPlaying(!playing)}
         >
-          {playing
-            ? <Pause size={20} />
-            : <Play size={20} />}
+          {playing ? (
+            <Pause size={20} />
+          ) : (
+            <Play size={20} />
+          )}
         </button>
 
-        <button>
+        <button
+          onClick={() => {
+            const next =
+              active >= tracks.length - 1
+                ? 0
+                : active + 1;
+
+            setActive(next);
+          }}
+        >
           <SkipForward size={20} />
         </button>
 
@@ -303,7 +503,10 @@ export default function Page() {
           <Repeat2 size={17} />
         </button>
 
-        <button className="download">
+        <button
+          className="download"
+          onClick={downloadTrack}
+        >
           <Download size={18} />
           İndir
         </button>
@@ -316,6 +519,19 @@ export default function Page() {
 
     </main>
   );
+}
+
+function formatDuration(seconds?: number | null) {
+  if (!seconds || seconds <= 0) {
+    return "—";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+
+  return `${minutes}:${remaining
+    .toString()
+    .padStart(2, "0")}`;
 }
 
 function Section({
@@ -342,4 +558,4 @@ function Section({
 
     </section>
   );
-}
+    }
